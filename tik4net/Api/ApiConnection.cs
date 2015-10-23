@@ -66,7 +66,7 @@ namespace tik4net.Api
             //login connection
             string hashedPass = ApiConnectionHelper.EncodePassword(password, responseHash);
             ApiCommand loginCommand = new ApiCommand(this, "/login", TikCommandParameterFormat.NameValue,
-                new ApiCommandParameter("name", user), new ApiCommandParameter("response", hashedPass));            
+                new ApiCommandParameter("name", user), new ApiCommandParameter("response", hashedPass));
             loginCommand.ExecuteNonQuery();
 
             _isOpened = true;
@@ -80,48 +80,67 @@ namespace tik4net.Api
 
         private long ReadWordLength()
         {
+            // Read the first byte of input which gives us some or all of the length
+            // of the remaining reply.
             byte readByte = (byte)_tcpConnectionStream.ReadByte();
-            int length = 0;
+
+            // final message length
+            long length = 0;
 
             // If the first bit is set then we need to remove the first four bits, shift left 8
             // and then read another byte in.
             // We repeat this for the second and third bits.
             // If the fourth bit is set, we need to remove anything left in the first byte
             // and then read in yet another byte.
-            if ((readByte & 0x80) != 0x00)
-            {
-                if ((readByte & 0xC0) == 0x80)
-                {
-                    length = ((readByte & 0x3F) << 8) + (byte)_tcpConnectionStream.ReadByte();
-                }
-                else
-                {
-                    if ((readByte & 0xE0) == 0xC0)
-                    {
-                        length = ((readByte & 0x1F) << 8) + (byte)_tcpConnectionStream.ReadByte();
-                        length = (length << 8) + (byte)_tcpConnectionStream.ReadByte();
-                    }
-                    else
-                    {
-                        if ((readByte & 0XF0) == 0XE0)
-                        {
-                            length = ((readByte & 0xF) << 8) + (byte)_tcpConnectionStream.ReadByte();
-                            length = (length << 8) + (byte)_tcpConnectionStream.ReadByte();
-                            length = (length << 8) + (byte)_tcpConnectionStream.ReadByte();
-                        }
-                        else
-                        {
-                            length = (byte)_tcpConnectionStream.ReadByte();
-                            length = (length << 8) + (byte)_tcpConnectionStream.ReadByte();
-                            length = (length << 8) + (byte)_tcpConnectionStream.ReadByte();
-                            length = (length << 8) + (byte)_tcpConnectionStream.ReadByte();
-                        }
-                    }
-                }
+            if (readByte < 0x80)
+            { // one byte encoded message
+                // only one byte
+                length = readByte;
+            }
+            else if ((readByte & 0xC0) == 0x80)
+            { // two byte encoded message
+                // mask out the 1st 2 bits
+                length = (readByte & 0x3F);
+                length = length << 8;
+                // then add the second byte
+                length += (byte)_tcpConnectionStream.ReadByte();
+            }
+            else if ((readByte & 0xE0) == 0xC0)
+            { // three byte encoded message
+                // mask out the 1st 3 bits
+                length = readByte & 0x1F;
+                length = length << 8;
+                // add the second byte
+                length += (byte)_tcpConnectionStream.ReadByte();
+                length = length << 8;
+                // add the third byte
+                length += (byte)_tcpConnectionStream.ReadByte();
+            }
+            else if ((readByte & 0xF0) == 0xE0)
+            { // four byte encoded message
+                // mask out the 1st 4 bits
+                length = readByte & 0xF;
+                length = length << 8;
+                // add the second byte
+                length += (byte)_tcpConnectionStream.ReadByte();
+                length = length << 8;
+                // add the third byte
+                length += (byte)_tcpConnectionStream.ReadByte();
+                length = length << 8;
+                // add the fourth byte
+                length += (byte)_tcpConnectionStream.ReadByte();
             }
             else
-            {
-                length = readByte;
+            { // five byte encoded message
+                length = (byte)_tcpConnectionStream.ReadByte();
+                // add the second byte
+                length += (byte)_tcpConnectionStream.ReadByte();
+                length = length << 8;
+                // add the third byte
+                length += (byte)_tcpConnectionStream.ReadByte();
+                length = length << 8;
+                // add the fourth byte
+                length += (byte)_tcpConnectionStream.ReadByte();
             }
 
             return length;
@@ -224,7 +243,7 @@ namespace tik4net.Api
                 }
             } while (true); //TODO max attempts???  //repeat until get any response for specific tag
         }
-        
+
         private IEnumerable<ITikSentence> GetAll(string tag)
         {
             ITikSentence sentence;
@@ -245,9 +264,9 @@ namespace tik4net.Api
             return GetAll(string.Empty).ToList();
         }
 
-        public Thread CallCommandAsync(IEnumerable<string> commandRows, string tag, 
+        public Thread CallCommandAsync(IEnumerable<string> commandRows, string tag,
             Action<ITikSentence> oneResponseCallback)
-        {            
+        {
             Guard.ArgumentNotNullOrEmptyString(tag, "tag");
 
             commandRows = commandRows.Concat(new string[] { string.Format("{0}={1}", TikSpecialProperties.Tag, tag) });
